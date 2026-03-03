@@ -1,13 +1,16 @@
 import os
 import logging
+import time
 from datetime import datetime, timedelta
 
 import psycopg2
 import requests
+from requests.adapters import HTTPAdapter
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from dotenv import load_dotenv
+from urllib3.util.retry import Retry
 
 load_dotenv()
 
@@ -24,9 +27,14 @@ API_TOKEN = os.getenv("API_TOKEN", "")
 CRON_HOUR = int(os.getenv("CRON_HOUR", "21"))
 CRON_MINUTE = int(os.getenv("CRON_MINUTE", "0"))
 INTERVAL_MINUTES = os.getenv("INTERVAL_MINUTES")
+PICKS_INTERVAL_MINUTES = int(os.getenv("PICKS_INTERVAL_MINUTES", "10"))
 
 PICKS_URL = os.getenv("PICKS_URL", "http://146.190.167.85/picks/match")
 DATABASE_URL = os.getenv("DATABASE_URL", "")
+PICKS_CONNECT_TIMEOUT = float(os.getenv("PICKS_CONNECT_TIMEOUT", "5"))
+PICKS_READ_TIMEOUT = float(os.getenv("PICKS_READ_TIMEOUT", "60"))
+PICKS_MAX_RETRIES = int(os.getenv("PICKS_MAX_RETRIES", "1"))
+PICKS_RETRY_BACKOFF = float(os.getenv("PICKS_RETRY_BACKOFF", "1.0"))
 
 LEAGUES = [
     "bundesliga",
@@ -81,36 +89,79 @@ def run():
     log.info("=== Tarea completada ===")
 
 
+def build_picks_session():
+    retry = Retry(
+        total=PICKS_MAX_RETRIES,
+        connect=PICKS_MAX_RETRIES,
+        read=PICKS_MAX_RETRIES,
+        status=PICKS_MAX_RETRIES,
+        backoff_factor=PICKS_RETRY_BACKOFF,
+        status_forcelist=(429, 500, 502, 503, 504),
+        allowed_methods=frozenset(["POST"]),
+        raise_on_status=False,
+    )
+    adapter = HTTPAdapter(max_retries=retry, pool_connections=20, pool_maxsize=20)
+    session = requests.Session()
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    return session
+
+
 def run_picks():
     log.info("=== Iniciando tarea de picks ===")
+    conn = None
+    cur = None
+    session = build_picks_session()
     try:
         conn = psycopg2.connect(DATABASE_URL)
         cur = conn.cursor()
         cur.execute(PICKS_QUERY)
         rows = cur.fetchall()
         log.info("Matches encontrados: %d", len(rows))
+        log.info(
+            "Picks config: connect_timeout=%.1fs read_timeout=%.1fs retries=%d",
+            PICKS_CONNECT_TIMEOUT,
+            PICKS_READ_TIMEOUT,
+            PICKS_MAX_RETRIES,
+        )
 
         headers = {"Content-Type": "application/json", "X-API-Token": API_TOKEN}
         for league, match_id in rows:
+            started = time.monotonic()
             try:
-                resp = requests.post(
+                resp = session.post(
                     PICKS_URL,
                     json={"league": league, "match_id": match_id},
                     headers=headers,
-                    timeout=20,
+                    timeout=(PICKS_CONNECT_TIMEOUT, PICKS_READ_TIMEOUT),
                 )
                 resp.raise_for_status()
                 cur.execute(UPDATE_QUERY, (league, match_id))
                 conn.commit()
-                log.info("OK  picks league=%-20s match_id=%s status=%s", league, match_id, resp.status_code)
+                log.info(
+                    "OK  picks league=%-20s match_id=%s status=%s elapsed=%.2fs",
+                    league,
+                    match_id,
+                    resp.status_code,
+                    time.monotonic() - started,
+                )
             except Exception as e:
                 conn.rollback()
-                log.error("FAIL picks league=%-20s match_id=%s error=%s", league, match_id, e)
-
-        cur.close()
-        conn.close()
+                log.error(
+                    "FAIL picks league=%-20s match_id=%s elapsed=%.2fs error=%s",
+                    league,
+                    match_id,
+                    time.monotonic() - started,
+                    e,
+                )
     except Exception as e:
-        log.error("Error de conexión DB: %s", e)
+        log.error("Error de conexion DB: %s", e)
+    finally:
+        if cur is not None:
+            cur.close()
+        if conn is not None:
+            conn.close()
+        session.close()
 
     log.info("=== Tarea de picks completada ===")
 
@@ -123,7 +174,7 @@ if __name__ == "__main__":
         log.info("Modo prueba calendario: cada %s minutos", INTERVAL_MINUTES)
     else:
         trigger = CronTrigger(hour=CRON_HOUR, minute=CRON_MINUTE, timezone=TIMEZONE)
-        log.info("Scheduler calendario: ejecutará a las %02d:%02d %s", CRON_HOUR, CRON_MINUTE, TIMEZONE)
+        log.info("Scheduler calendario: ejecutara a las %02d:%02d %s", CRON_HOUR, CRON_MINUTE, TIMEZONE)
 
     scheduler.add_job(
         run,
@@ -135,12 +186,12 @@ if __name__ == "__main__":
 
     scheduler.add_job(
         run_picks,
-        IntervalTrigger(minutes=10),
+        IntervalTrigger(minutes=PICKS_INTERVAL_MINUTES),
         id="picks_job",
         name="Picks",
         misfire_grace_time=60,
     )
-    log.info("Scheduler picks: cada 10 minutos")
+    log.info("Scheduler picks: cada %d minutos", PICKS_INTERVAL_MINUTES)
 
     try:
         scheduler.start()
