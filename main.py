@@ -53,8 +53,8 @@ PICKS_QUERY = """
     SELECT league, match_id
     FROM public.fixtures_calendar
     WHERE model_triggered_at IS NULL
-      AND kickoff_utc >= (now() - interval '12 hours')
-      AND kickoff_utc <= (now() + interval '30 minutes')
+      AND kickoff_utc >= now()
+      AND kickoff_utc <= now() + interval '30 minutes'
     ORDER BY kickoff_utc
 """
 
