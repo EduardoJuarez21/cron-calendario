@@ -1,7 +1,7 @@
 import os
 import logging
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import psycopg2
 import requests
@@ -35,6 +35,7 @@ PICKS_CONNECT_TIMEOUT = float(os.getenv("PICKS_CONNECT_TIMEOUT", "5"))
 PICKS_READ_TIMEOUT = float(os.getenv("PICKS_READ_TIMEOUT", "60"))
 PICKS_MAX_RETRIES = int(os.getenv("PICKS_MAX_RETRIES", "1"))
 PICKS_RETRY_BACKOFF = float(os.getenv("PICKS_RETRY_BACKOFF", "1.0"))
+QUERY_TZ = timezone(timedelta(hours=-6))
 
 LEAGUES = [
     "bundesliga",
@@ -53,14 +54,14 @@ PICKS_QUERY = """
     SELECT league, match_id
     FROM public.fixtures_calendar
     WHERE model_triggered_at IS NULL
-      AND kickoff_utc >= now()
-      AND kickoff_utc <= now() + interval '30 minutes'
+      AND kickoff_utc >= %s
+      AND kickoff_utc <= %s
     ORDER BY kickoff_utc
 """
 
 UPDATE_QUERY = """
     UPDATE public.fixtures_calendar
-       SET model_triggered_at = now()
+       SET model_triggered_at = %s
      WHERE league = %s
        AND match_id = %s
        AND model_triggered_at IS NULL
@@ -80,7 +81,7 @@ def call_calendario(league: str, day: str):
 
 def run():
     log.info("=== Iniciando tarea de calendario ===")
-    target_date = (datetime.now() + timedelta(days=DAYS_AHEAD)).strftime("%Y-%m-%d")
+    target_date = (datetime.now(QUERY_TZ) + timedelta(days=DAYS_AHEAD)).strftime("%Y-%m-%d")
     log.info("Fecha objetivo: %s | Ligas: %d", target_date, len(LEAGUES))
 
     for league in LEAGUES:
@@ -115,7 +116,9 @@ def run_picks():
     try:
         conn = psycopg2.connect(DATABASE_URL)
         cur = conn.cursor()
-        cur.execute(PICKS_QUERY)
+        window_start = datetime.now(QUERY_TZ)
+        window_end = window_start + timedelta(minutes=30)
+        cur.execute(PICKS_QUERY, (window_start, window_end))
         rows = cur.fetchall()
         log.info("Matches encontrados: %d", len(rows))
         log.info(
@@ -136,7 +139,7 @@ def run_picks():
                     timeout=(PICKS_CONNECT_TIMEOUT, PICKS_READ_TIMEOUT),
                 )
                 resp.raise_for_status()
-                cur.execute(UPDATE_QUERY, (league, match_id))
+                cur.execute(UPDATE_QUERY, (datetime.now(QUERY_TZ), league, match_id))
                 conn.commit()
                 log.info(
                     "OK  picks league=%-20s match_id=%s status=%s elapsed=%.2fs",
