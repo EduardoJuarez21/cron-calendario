@@ -54,14 +54,14 @@ PICKS_QUERY = """
     SELECT league, match_id
     FROM public.fixtures_calendar
     WHERE model_triggered_at IS NULL
-      AND kickoff_utc >= %s
-      AND kickoff_utc <= %s
+      AND (kickoff_utc - INTERVAL '6 hours') >= %s
+      AND (kickoff_utc - INTERVAL '6 hours') <= %s
     ORDER BY kickoff_utc
 """
 
 UPDATE_QUERY = """
     UPDATE public.fixtures_calendar
-       SET model_triggered_at = %s
+       SET model_triggered_at = NOW() - INTERVAL '6 hours'
      WHERE league = %s
        AND match_id = %s
        AND model_triggered_at IS NULL
@@ -116,7 +116,7 @@ def run_picks():
     try:
         conn = psycopg2.connect(DATABASE_URL)
         cur = conn.cursor()
-        window_start = datetime.now(QUERY_TZ)
+        window_start = datetime.now(QUERY_TZ).replace(tzinfo=None)
         window_end = window_start + timedelta(minutes=30)
         cur.execute(PICKS_QUERY, (window_start, window_end))
         rows = cur.fetchall()
@@ -139,7 +139,7 @@ def run_picks():
                     timeout=(PICKS_CONNECT_TIMEOUT, PICKS_READ_TIMEOUT),
                 )
                 resp.raise_for_status()
-                cur.execute(UPDATE_QUERY, (datetime.now(QUERY_TZ), league, match_id))
+                cur.execute(UPDATE_QUERY, (league, match_id))
                 conn.commit()
                 log.info(
                     "OK  picks league=%-20s match_id=%s status=%s elapsed=%.2fs",
