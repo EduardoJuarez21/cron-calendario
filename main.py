@@ -28,6 +28,9 @@ CRON_HOUR = int(os.getenv("CRON_HOUR", "21"))
 CRON_MINUTE = int(os.getenv("CRON_MINUTE", "0"))
 INTERVAL_MINUTES = os.getenv("INTERVAL_MINUTES")
 PICKS_INTERVAL_MINUTES = int(os.getenv("PICKS_INTERVAL_MINUTES", "10"))
+EARLY_CUTOFF_HOUR = int(os.getenv("EARLY_CUTOFF_HOUR", "10"))
+EARLY_CRON_HOUR = int(os.getenv("EARLY_CRON_HOUR", "22"))
+EARLY_CRON_MINUTE = int(os.getenv("EARLY_CRON_MINUTE", "0"))
 
 PICKS_URL = os.getenv("PICKS_URL", "http://146.190.167.85/picks/match")
 DATABASE_URL = os.getenv("DATABASE_URL", "")
@@ -108,7 +111,7 @@ def build_picks_session():
     return session
 
 
-def run_picks():
+def run_picks(window_start=None, window_end=None):
     log.info("=== Iniciando tarea de picks ===")
     conn = None
     cur = None
@@ -116,8 +119,10 @@ def run_picks():
     try:
         conn = psycopg2.connect(DATABASE_URL)
         cur = conn.cursor()
-        window_start = datetime.now(QUERY_TZ).replace(tzinfo=None)
-        window_end = window_start + timedelta(minutes=30)
+        if window_start is None:
+            window_start = datetime.now(QUERY_TZ).replace(tzinfo=None)
+        if window_end is None:
+            window_end = window_start + timedelta(minutes=30)
         cur.execute(PICKS_QUERY, (window_start, window_end))
         rows = cur.fetchall()
         log.info("Matches encontrados: %d", len(rows))
@@ -169,6 +174,19 @@ def run_picks():
     log.info("=== Tarea de picks completada ===")
 
 
+def run_early_picks():
+    """Dispara picks anticipados para partidos antes de las EARLY_CUTOFF_HOUR del día siguiente."""
+    tomorrow = (datetime.now(QUERY_TZ) + timedelta(days=1)).replace(tzinfo=None)
+    window_start = tomorrow.replace(hour=0, minute=0, second=0, microsecond=0)
+    window_end = tomorrow.replace(hour=EARLY_CUTOFF_HOUR, minute=0, second=0, microsecond=0)
+    log.info(
+        "=== Picks anticipados: %s - %s (UTC-6) ===",
+        window_start.strftime("%Y-%m-%d %H:%M"),
+        window_end.strftime("%Y-%m-%d %H:%M"),
+    )
+    run_picks(window_start=window_start, window_end=window_end)
+
+
 if __name__ == "__main__":
     scheduler = BlockingScheduler(timezone=TIMEZONE)
 
@@ -195,6 +213,18 @@ if __name__ == "__main__":
         misfire_grace_time=60,
     )
     log.info("Scheduler picks: cada %d minutos", PICKS_INTERVAL_MINUTES)
+
+    scheduler.add_job(
+        run_early_picks,
+        CronTrigger(hour=EARLY_CRON_HOUR, minute=EARLY_CRON_MINUTE, timezone=TIMEZONE),
+        id="early_picks_job",
+        name="EarlyPicks",
+        misfire_grace_time=300,
+    )
+    log.info(
+        "Scheduler early picks: ejecutara a las %02d:%02d %s (partidos mañana antes de las %02d:00 UTC-6)",
+        EARLY_CRON_HOUR, EARLY_CRON_MINUTE, TIMEZONE, EARLY_CUTOFF_HOUR,
+    )
 
     try:
         scheduler.start()
