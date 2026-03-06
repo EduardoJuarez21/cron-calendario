@@ -57,14 +57,14 @@ PICKS_QUERY = """
     SELECT league, match_id
     FROM public.fixtures_calendar
     WHERE model_triggered_at IS NULL
-      AND (kickoff_utc - INTERVAL '6 hours') >= %s
-      AND (kickoff_utc - INTERVAL '6 hours') <= %s
+      AND kickoff_utc >= %s
+      AND kickoff_utc <= %s
     ORDER BY kickoff_utc
 """
 
 UPDATE_QUERY = """
     UPDATE public.fixtures_calendar
-       SET model_triggered_at = NOW() - INTERVAL '6 hours'
+       SET model_triggered_at = NOW() AT TIME ZONE 'Etc/GMT+6'
      WHERE league = %s
        AND match_id = %s
        AND model_triggered_at IS NULL
