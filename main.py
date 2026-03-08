@@ -51,6 +51,8 @@ LEAGUES = [
     "primeiraliga",
     "segundadivision",
     "seriea",
+    "ligue1",
+    "facup"
 ]
 
 PICKS_QUERY = """
