@@ -33,6 +33,8 @@ EARLY_CRON_HOUR = int(os.getenv("EARLY_CRON_HOUR", "22"))
 EARLY_CRON_MINUTE = int(os.getenv("EARLY_CRON_MINUTE", "0"))
 
 PICKS_URL = os.getenv("PICKS_URL", "http://146.190.167.85/picks/match")
+RESULTS_SYNC_URL = os.getenv("RESULTS_SYNC_URL", "http://web:8000/picks/result/sync/today")
+RESULTS_SYNC_INTERVAL_MINUTES = int(os.getenv("RESULTS_SYNC_INTERVAL_MINUTES", "60"))
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 PICKS_CONNECT_TIMEOUT = float(os.getenv("PICKS_CONNECT_TIMEOUT", "5"))
 PICKS_READ_TIMEOUT = float(os.getenv("PICKS_READ_TIMEOUT", "60"))
@@ -176,6 +178,29 @@ def run_picks(window_start=None, window_end=None):
     log.info("=== Tarea de picks completada ===")
 
 
+def run_results_sync():
+    log.info("=== Iniciando sync de resultados ===")
+    headers = {"Content-Type": "application/json", "X-API-Token": API_TOKEN}
+    try:
+        resp = requests.post(
+            RESULTS_SYNC_URL,
+            json={},
+            headers=headers,
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        results = data.get("results", {})
+        summary = " | ".join(
+            f"{lg}: updated={v.get('updated',0)} graded={v.get('graded',0)} missing={v.get('missing',0)}"
+            for lg, v in results.items()
+        )
+        log.info("OK  results_sync day=%s %s", data.get("day"), summary)
+    except Exception as e:
+        log.error("FAIL results_sync error=%s", e)
+    log.info("=== Sync de resultados completado ===")
+
+
 def run_early_picks():
     """Dispara picks anticipados para partidos antes de las EARLY_CUTOFF_HOUR del día siguiente."""
     tomorrow = (datetime.now(QUERY_TZ) + timedelta(days=1)).replace(tzinfo=None)
@@ -227,6 +252,15 @@ if __name__ == "__main__":
         "Scheduler early picks: ejecutara a las %02d:%02d %s (partidos mañana antes de las %02d:00 UTC-6)",
         EARLY_CRON_HOUR, EARLY_CRON_MINUTE, TIMEZONE, EARLY_CUTOFF_HOUR,
     )
+
+    scheduler.add_job(
+        run_results_sync,
+        IntervalTrigger(minutes=RESULTS_SYNC_INTERVAL_MINUTES),
+        id="results_sync_job",
+        name="ResultsSync",
+        misfire_grace_time=300,
+    )
+    log.info("Scheduler results sync: cada %d minutos", RESULTS_SYNC_INTERVAL_MINUTES)
 
     try:
         scheduler.start()
