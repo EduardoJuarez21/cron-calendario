@@ -255,12 +255,12 @@ if __name__ == "__main__":
 
     scheduler.add_job(
         run_results_sync,
-        IntervalTrigger(minutes=RESULTS_SYNC_INTERVAL_MINUTES),
+        CronTrigger(minute=0, timezone=TIMEZONE),
         id="results_sync_job",
         name="ResultsSync",
         misfire_grace_time=300,
     )
-    log.info("Scheduler results sync: cada %d minutos", RESULTS_SYNC_INTERVAL_MINUTES)
+    log.info("Scheduler results sync: cada hora en punto (:00)")
 
     try:
         scheduler.start()
