@@ -186,7 +186,7 @@ def run_results_sync():
             RESULTS_SYNC_URL,
             json={},
             headers=headers,
-            timeout=30,
+            timeout=120,
         )
         resp.raise_for_status()
         data = resp.json()
