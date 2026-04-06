@@ -47,7 +47,6 @@ LEAGUES = [
     "epl",
     "eredivisie",
     "laliga",
-    "ligamx",
     "mls",
     "nba",
     "primeiraliga",
