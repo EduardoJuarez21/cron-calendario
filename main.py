@@ -49,7 +49,6 @@ LEAGUES = [
     "laliga",
     "mls",
     "nba",
-    "primeiraliga",
     "segundadivision",
     "seriea",
     "ligue1",
