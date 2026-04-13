@@ -48,7 +48,6 @@ LEAGUES = [
     "eredivisie",
     "laliga",
     "mls",
-    "nba",
     "segundadivision",
     "seriea",
     "ligue1",
