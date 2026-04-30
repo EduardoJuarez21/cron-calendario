@@ -43,11 +43,16 @@ PICKS_RETRY_BACKOFF = float(os.getenv("PICKS_RETRY_BACKOFF", "1.0"))
 QUERY_TZ = timezone(timedelta(hours=-6))
 
 LEAGUES = [
+    "argentinaprimera",
     "bundesliga",
+    "colombiaprimeraa",
     "epl",
     "eredivisie",
     "laliga",
+    "ligamx",
     "mls",
+    "primeiraliga",
+    "saudiproleague",
     "segundadivision",
     "seriea",
     "ligue1",
