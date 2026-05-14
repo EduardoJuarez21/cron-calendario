@@ -183,10 +183,11 @@ def run_picks(window_start=None, window_end=None):
 def run_results_sync():
     log.info("=== Iniciando sync de resultados ===")
     headers = {"Content-Type": "application/json", "X-API-Token": API_TOKEN}
+    target_day = datetime.now(QUERY_TZ).strftime("%Y-%m-%d")
     try:
         resp = requests.post(
             RESULTS_SYNC_URL,
-            json={},
+            json={"day": target_day},
             headers=headers,
             timeout=120,
         )
@@ -197,7 +198,7 @@ def run_results_sync():
             f"{lg}: updated={v.get('updated',0)} graded={v.get('graded',0)} missing={v.get('missing',0)}"
             for lg, v in results.items()
         )
-        log.info("OK  results_sync day=%s %s", data.get("day"), summary)
+        log.info("OK  results_sync day=%s requested_day=%s %s", data.get("day"), target_day, summary)
     except Exception as e:
         log.error("FAIL results_sync error=%s", e)
     log.info("=== Sync de resultados completado ===")
